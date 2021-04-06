@@ -1,7 +1,28 @@
 import os
 import numpy as np
 import json
+from scipy.linalg import norm
 from PIL import Image
+
+
+def get_ref_red_lights():
+    """Get some reference images of red lights from the first image."""
+    coords_dict = {
+        0: [[154, 316, 171, 323], [180, 67, 205, 79], [192, 419, 207, 428]],
+        1: [[175, 322, 197, 332], [215, 44, 245, 59], [222, 400, 245, 410]],
+        2: [[232, 121, 255, 129], [199, 278, 219, 292], [202, 335, 220, 342], [243, 414, 265, 423]],
+        9: [[13, 122, 85, 174], [25, 320, 94, 350], [174, 600, 241, 629]]
+    }
+    ref = []
+    for i in coords_dict:
+        I = Image.open(os.path.join(data_path,file_names[i]))
+        I = np.asarray(I)
+        for coords_list in coords_dict[i]:
+            tl_row, tl_col, br_row, br_col = top_row, left_col, bot_row, right_col = coords_list
+            obj = I[top_row:bot_row, left_col:right_col, :]
+            ref.append(obj)
+    return ref
+
 
 def detect_red_light(I):
     '''
@@ -30,20 +51,41 @@ def detect_red_light(I):
     of fixed size and returns the results in the proper format.
     '''
     
-    box_height = 8
-    box_width = 6
-    
-    num_boxes = np.random.randint(1,5) 
-    
-    for i in range(num_boxes):
+    dists_rgb = []
+    dists_tb = []
+    for ref in ref_list:
+        ref_height, ref_width, _ = ref.shape
+        box_height = ref_height
+        box_width = ref_width
         (n_rows,n_cols,n_channels) = np.shape(I)
-        
-        tl_row = np.random.randint(n_rows - box_height)
-        tl_col = np.random.randint(n_cols - box_width)
-        br_row = tl_row + box_height
-        br_col = tl_col + box_width
-        
-        bounding_boxes.append([tl_row,tl_col,br_row,br_col]) 
+        for i in range(n_rows - box_height):
+            for j in range(n_cols - box_width):
+                tl_row = i
+                br_row = i + box_height
+                tl_col = j
+                br_col = j + box_width
+                test_box = I[tl_row:br_row, tl_col:br_col, :]
+                test_box_max = np.max(test_box)
+                test_box_min = np.min(test_box)
+                if test_box_max < 150 or test_box_min > 100:
+                    continue
+                dist_rgb = norm(ref - test_box)
+
+                if dist_rgb < 1000:
+                    bounding_boxes.append([tl_row,tl_col,br_row,br_col])
+                if dist_rgb < 1500:
+                    test_box_mean = np.mean(test_box)
+                    test_box_std = np.std(test_box)
+                    if test_box_max > 150 and test_box_max > test_box_mean + test_box_std*2:
+                        if tl_row + (br_col - tl_col)*2 < br_row:
+                            a = I[tl_row:tl_row + (br_col - tl_col), tl_col:br_col, :]
+                            b = I[tl_row + (br_col - tl_col):tl_row + (br_col - tl_col)*2,
+                                  tl_col:br_col, :]
+                            dist_tb = norm(a - b)
+                            if dist_tb > 7000:
+                                bounding_boxes.append([tl_row,tl_col,br_row,br_col])
+                        else:
+                            bounding_boxes.append([tl_row,tl_col,br_row,br_col])
     
     '''
     END YOUR CODE
@@ -69,9 +111,11 @@ file_names = sorted(os.listdir(data_path))
 # remove any non-JPEG files: 
 file_names = [f for f in file_names if '.jpg' in f] 
 
+ref_list = get_ref_red_lights()
 preds = {}
 for i in range(len(file_names)):
     
+    print(i)
     # read image using PIL:
     I = Image.open(os.path.join(data_path,file_names[i]))
     
